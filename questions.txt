@@ -1,0 +1,18 @@
+Q: What is the capital of France?*
+A: Paris
+A: Madrid
+A: Berlin
+A: G1
+C: 0
+Q: What is the largest ocean in the world?
+A: Pacific
+A: Atlantic
+A: Indian
+A: I1
+C: 0
+Q: Who is the current President of the United States?
+A: Joe Biden
+A: Barack Obama
+A: Donald Trump
+A: D1
+C: 0
