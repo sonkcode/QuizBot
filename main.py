@@ -1,133 +1,142 @@
 import telebot
 import random
-import threading
+import time
+import json
+bot = telebot.TeleBot("6282287565:AAE-_Rm_rKRj0XRND9tTnTvcl0Gwp9bfv5g")
 
-# Create a new bot by passing the bot token obtained from BotFather
-bot = telebot.TeleBot("6190023351:AAEHl4Z0C5IZE7prX5pMOgbYuxNK7b9Y5BY")
-
-with open("questions.txt", "r") as f:
+with open("questions.txt", "r", encoding='UTF8') as f:
     lines = f.readlines()
-
 questions = {}
 answers = {}
-
 i = 0
 while i < len(lines):
-    # Read the question
     question = lines[i].strip().split("Q: ")[1]
-    # Read the answer options
     answer_options = []
     for j in range(4):
         option = lines[i + j + 1].strip().split("A: ")[1]
         answer_options.append(option)
-    # Read the index of the correct answer option
     correct_index = int(lines[i + 5].strip().split("C: ")[1])
     correct_answer = answer_options[correct_index]
-    # Add the question and answer to the dictionaries
     questions[question] = answer_options
     answers[question] = correct_answer
-    # Update the index to the next question
     i += 6
-# Define a dictionary to keep track of the user's points
-points = {}
+POINTS_FILE = "leaderboard.json"
 
-# Define the number of questions to ask in each game
-NUM_QUESTIONS = 3
+def load_points():
+    try:
+        with open(POINTS_FILE, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
 
-# Define the time limit for answering each question (in seconds)
-TIME_LIMIT = 10
+def save_points(points):
+    with open(POINTS_FILE, "w") as f:
+        json.dump(points, f)
 
+points = load_points()
+NUM_QUESTIONS = 49
 recipient_username = 1170363727
+@bot.message_handler(commands=['leaderboard'])
+def leaderboard_command(message):
+    sorted_points = sorted(points.items(), key=lambda x: x[1], reverse=True)
+    leaderboard = "Таблица лидеров:\n\n"
+    for i, (player_id, player_points) in enumerate(sorted_points):
+        player = bot.get_chat(player_id)
+        leaderboard += f"{i+1}. {player.first_name} {player.last_name}: {player_points} points\n"
+    bot.send_message(message.chat.id, leaderboard)
 
-# Handler for the "/start" command
+@bot.message_handler(func=lambda message: message.text == "Таблица лидеров")
+def leaderboard_handler(message):
+    leaderboard_command(message)
+
 @bot.message_handler(commands=['start'])
 def start_command(message):
-    # Create the reply markup with the main menu options
-    markup = telebot.types.ReplyKeyboardMarkup(row_width=1)
-    markup.add(telebot.types.KeyboardButton("Start playing"))
-    markup.add(telebot.types.KeyboardButton("Rules of the game"))
-    markup.add(telebot.types.KeyboardButton("Exit"))
-
-    # Send the main menu to the user
+    markup = telebot.types.ReplyKeyboardMarkup(row_width=2)
+    markup.add(telebot.types.KeyboardButton("Начать играть"), telebot.types.KeyboardButton("Выход"))
+    markup.add(telebot.types.KeyboardButton("Приз игры"), telebot.types.KeyboardButton("Правила игры"))
+    markup.add(telebot.types.KeyboardButton("Таблица лидеров"))
     bot.send_message(message.chat.id,
-                     "Welcome to the Trivia Bot! Please select an option from the menu below:",
+                     "Добро пожаловать в бот 'Незнайка 1.1'! Добавлена таблица лидеров. [Весенний сезон. Игра 2.]",
                      reply_markup=markup)
-
 @bot.message_handler(func=lambda message: True)
 def menu_handler(message):
-    if message.text == "Start playing":
-        # Reset the user's points
+    if message.text == "Начать играть":
         points[message.chat.id] = 0
-
-        # Create a shuffled list of the questions
         question_list = list(questions.keys())
         random.shuffle(question_list)
-
-        # Send a welcome message and start the first question
+        ask_question(message, question_list, 0, recipient_username, time.time())
+    elif message.text == "Приз игры":
+        photo = open('q1.jpg', 'rb')
+        bot.send_photo(message.chat.id, photo)
+    elif message.text == "Правила игры":
         bot.send_message(message.chat.id,
-                         "Welcome to the Trivia Bot! You will be asked a series of questions and earn points for each correct answer. Let's begin!")
-        ask_question(message, question_list, 0, recipient_username)
-
-
-    elif message.text == "Rules of the game":
-        # Send the rules of the game to the user
-        bot.send_message(message.chat.id,
-                          "The rules of the game are simple. You will be asked a series of questions and earn points for each correct answer. Good luck!")
-
-    elif message.text == "About the author":
-        # Send information about the author to the user
-        bot.send_message(message.chat.id,
-                          "This bot was created by John Smith.")
-
-    elif message.text == "Exit":
-        # Send a message to indicate that the user has exited the game
-        bot.send_message(message.chat.id, "Goodbye.", reply_markup=telebot.types.ReplyKeyboardRemove())
-def ask_question(message, question_list, question_index, recipient_username):
-    # If all questions have been asked, end the game
-    if question_index >= NUM_QUESTIONS:
-        bot.send_message(message.chat.id, f"Game over! You earned {points[message.chat.id]} points.", reply_markup=telebot.types.ReplyKeyboardRemove())
-        bot.send_message(recipient_username,
-                         f"Results from Trivia Bot: {message.chat.first_name} {message.chat.last_name}:{message.chat.id} earned {points[message.chat.id]} points.")
+                          "Вопрос и четыре варианта ответа. Только один вариант правильный. Игра ограничена 12 минутами. Для того чтобы сыграть снова напишите сообщение /start")
+    elif message.text == "Выход":
+        bot.send_message(message.chat.id, "Пока.", reply_markup=telebot.types.ReplyKeyboardRemove())
+    elif message.text == "Leaderboard":
+        leaderboard_command(message)
         return
-
-    # Get the next question and its answer options
+    save_points(points)
+def ask_question(message, question_list, question_index, recipient_username, start_time):
+    if question_index >= NUM_QUESTIONS or time.time() - start_time > 750:
+        num_points = points[message.chat.id]
+        points_word = "очков"
+        if num_points % 10 == 1 and num_points != 11:
+            points_word = "очко"
+        elif num_points % 10 in [2, 3, 4] and num_points not in [12, 13, 14]:
+            points_word = "очка"
+        bot.send_message(message.chat.id, f"Игра завершилась! Вы заработали {num_points} {points_word}.",
+                         reply_markup=telebot.types.ReplyKeyboardRemove())
+        bot.send_message(recipient_username,
+                         f"Результаты: {message.chat.first_name} {message.chat.last_name}:{message.chat.id} заработал {num_points} {points_word}.")
+        if question_index >= NUM_QUESTIONS:
+            markup = telebot.types.ReplyKeyboardMarkup(row_width=2)
+            markup.add(telebot.types.KeyboardButton("Играть еще раз"), telebot.types.KeyboardButton("Выход"))
+            bot.send_message(message.chat.id, "Вы ответили на все вопросы! Хотите сыграть еще раз или выйти?",
+                             reply_markup=markup)
+            bot.register_next_step_handler(message, handle_offer)
+        return
     question = question_list[question_index]
     answer_options = questions[question]
+    markup = telebot.types.ReplyKeyboardMarkup(row_width=2)
+    for i in range(0, len(answer_options), 2):
+        markup.add(telebot.types.KeyboardButton(answer_options[i]), telebot.types.KeyboardButton(answer_options[i + 1]))
+    bot.send_message(message.chat.id, f"Вопрос {question_index + 1}/{NUM_QUESTIONS}\n<b>{question}</b>",
+                     reply_markup=markup, parse_mode='HTML')
+    bot.register_next_step_handler(message, handle_answer, question, answer_options, question_list, question_index,
+                                   start_time)
+def handle_offer(message):
+    if message.text == "Играть еще раз":
+        points[message.chat.id] = 0
+        question_list = list(questions.keys())
+        random.shuffle(question_list)
+        ask_question(message, question_list, 0, recipient_username, time.time())
+    elif message.text == "Выход":
+        bot.send_message(message.chat.id, "Спасибо за игру! До свидания.",
+                         reply_markup=telebot.types.ReplyKeyboardRemove())
+def is_game_over(start_time):
+    return time.time() - start_time >= 750
 
-    # Create the reply markup with the answer options
-    markup = telebot.types.ReplyKeyboardMarkup(row_width=1)
-    for option in answer_options:
-        markup.add(telebot.types.KeyboardButton(option))
-
-    # Send the question to the user with the answer options
-    bot.send_message(message.chat.id, question, reply_markup=markup)
-
-    # Set the handler for the user's answer
-    t = threading.Timer(TIME_LIMIT, handle_timeout, args=[message, question_list, question_index])
-    t.start()
-    bot.register_next_step_handler(message, handle_answer, question, answer_options, question_list, question_index, t)
-
-def handle_timeout(message, question_list, question_index):
-    bot.send_message(message.chat.id, "Sorry, time's up! Moving on to the next question.")
-    ask_question(message, question_list, question_index + 1, recipient_username)
-
-def handle_answer(message, question, answer_options, question_list, question_index, timer):
-    # Stop the timer
-    timer.cancel()
-
-    # Get the user's answer
+def handle_answer(message, question, answer_options, question_list, question_index, start_time):
     answer = message.text
-
-    # Check if the answer is correct
+    num_points = points[message.chat.id]
+    points_word = "очков"
+    if num_points % 10 == 1 and num_points != 11:
+        points_word = "очко"
+    elif num_points % 10 in [2, 3, 4] and num_points not in [12, 13, 14]:
+        points_word = "очка"
+    elapsed_time = time.time() - start_time
+    if elapsed_time >= 750:
+        bot.send_message(message.chat.id, "Время вышло! Игра закончилась.")
+        bot.send_message(message.chat.id, f"Игра завершилась! Вы заработали {num_points} {points_word}.",
+                         reply_markup=telebot.types.ReplyKeyboardRemove())
+        bot.send_message(recipient_username,
+                         f"Результаты: {message.chat.first_name} {message.chat.last_name}:{message.chat.id} заработал {num_points} {points_word}.")
+        return
     if answer == answers[question]:
-        # Increment the user's points
         points[message.chat.id] += 1
-        bot.send_message(message.chat.id, "Correct! You earned 1 point.")
+        bot.send_message(message.chat.id, "Правильно! Вы заработали 1 очко.")
     else:
-        bot.send_message(message.chat.id, "Sorry, that's incorrect.")
-
-    # Ask the next question
-    ask_question(message, question_list, question_index + 1, recipient_username)
-
-# Run the bot
+        bot.send_message(message.chat.id, f"Неверно. Правильный ответ\n<b>{answers[question]}</b>", parse_mode="HTML")
+    ask_question(message, question_list, question_index + 1, recipient_username, time.time())
 bot.polling()
